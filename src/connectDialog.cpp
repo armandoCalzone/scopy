@@ -21,17 +21,23 @@
 #include "connectDialog.hpp"
 #include "dynamicWidget.hpp"
 #include <QtConcurrentRun>
+#include <QProcess>
 #include <functional>
 
 #include "ui_connect.h"
 
 #include <iio.h>
 #include <iostream>
+#include<csignal>
 
 using namespace adiscope;
 
+static QProcess *process;
+static qint64 pid;
+static void quit_all(int32_t sig);
+
 ConnectDialog::ConnectDialog(QWidget *widget) : QWidget(widget),
-	ui(new Ui::Connect), connected(false)
+	ui(new Ui::Connect), connected(false), enableDemo(false)
 {
 	ui->setupUi(this);
 	ui->connectBtn->setText(tr("Connect"));
@@ -39,6 +45,7 @@ ConnectDialog::ConnectDialog(QWidget *widget) : QWidget(widget),
 	ui->connectBtn->setDisabled(true);
 
 	connect(ui->connectBtn, SIGNAL(clicked()), this, SLOT(btnClicked()));
+	connect(ui->enableDemoBtn, SIGNAL(clicked()), this, SLOT(enableDemoBtn()));
 	connect(ui->hostname, SIGNAL(returnPressed()),
 	        this, SLOT(btnClicked()));
 	connect(ui->hostname, SIGNAL(textChanged(const QString&)),
@@ -50,11 +57,23 @@ ConnectDialog::ConnectDialog(QWidget *widget) : QWidget(widget),
 	setDynamicProperty(ui->hostname, "invalid", false);
 	setDynamicProperty(ui->hostname, "valid", false);
 	ui->infoSection->hide();
+
+	ui->demoDevicesComboBox->addItem("ADALM2000");
+	ui->demoDevicesComboBox->setDisabled(true);
+
+	set_handler(SIGHUP, &quit_all);
+	set_handler(SIGPIPE, &quit_all);
+	set_handler(SIGINT, &quit_all);
+	set_handler(SIGSEGV, &quit_all);
+	set_handler(SIGTERM, &quit_all);
+	set_handler(SIGABRT, &quit_all);
 }
 
 ConnectDialog::~ConnectDialog()
 {
 	delete ui;
+	kill(pid, SIGKILL);
+	delete process;
 }
 
 QString ConnectDialog::URIstringParser(QString uri)
@@ -86,8 +105,41 @@ void ConnectDialog::btnClicked()
 		QString new_uri = URIstringParser(ui->hostname->text());
 		Q_EMIT newContext(new_uri);
 	} else {
+		if (enableDemo) {
+			QString program = "iio-emu/iio-emu";
+			QStringList arguments;
+			arguments.append(ui->demoDevicesComboBox->currentText());
+			process = new QProcess(this);
+			process->setProgram(program);
+			process->setArguments(arguments);
+			auto ret = process->startDetached(&pid);
+			if (!ret) {
+				return;
+			}
+			QThread::msleep(100);
+		}
 		validateInput();
 	}
+}
+
+void ConnectDialog::enableDemoBtn()
+{
+	if (!enableDemo) {
+		ui->enableDemoBtn->setChecked(true);
+		ui->enableDemoBtn->setText("Disable Demo");
+		ui->hostname->setText("127.0.0.1");
+		ui->demoDevicesComboBox->setDisabled(false);
+
+		enableDemo = true;
+	} else {
+		ui->enableDemoBtn->setChecked(false);
+		ui->enableDemoBtn->setText("Enable Demo");
+		ui->hostname->setText("");
+		ui->demoDevicesComboBox->setDisabled(true);
+
+		enableDemo = false;
+	}
+
 }
 
 void ConnectDialog::discardSettings()
@@ -163,4 +215,18 @@ bool ConnectDialog::eventFilter(QObject *watched, QEvent *event)
 	}
 
 	return false;
+}
+
+void ConnectDialog::set_handler(int32_t signal_nb, void (*handler)(int32_t))
+{
+	struct sigaction sig;
+	sigaction(signal_nb, NULL, &sig);
+	sig.sa_handler = handler;
+	sigaction(signal_nb, &sig, NULL);
+}
+
+static void quit_all(int32_t sig)
+{
+	kill(pid, SIGKILL);
+	delete process;
 }

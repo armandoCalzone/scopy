@@ -52,6 +52,7 @@ public Q_SLOTS:
 
 private Q_SLOTS:
 	void btnClicked();
+	void enableDemoBtn();
 	void validateInput();
 	void updatePopUp(struct iio_context *ctx);
 
@@ -59,8 +60,10 @@ private Q_SLOTS:
 private:
 	Ui::Connect *ui;
 	bool connected;
+	bool enableDemo;
 	void createContext(const QString& uri);
 	bool eventFilter(QObject *watched, QEvent *event);
+	void set_handler(int32_t signal_nb, void (*handler)(int32_t));
 };
 }
 
